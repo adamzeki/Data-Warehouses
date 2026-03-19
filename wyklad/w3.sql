@@ -45,13 +45,13 @@ ORDER BY Rok, DATEPART(dw, soh.OrderDate);
 --2
 
 --bez CTE
+-- Klienci na miesiąc
 SELECT 
     YEAR(OrderDate) AS Rok, 
     MONTH(OrderDate) AS Miesiac, 
     GrupaWiekowa, 
     COUNT(DISTINCT CustomerID) AS LiczbaKlientow
 FROM (
-    -- Podzapytanie przygotowujące segmentację
     SELECT 
         soh.OrderDate, 
         soh.CustomerID,
@@ -67,17 +67,17 @@ FROM (
 GROUP BY YEAR(OrderDate), MONTH(OrderDate), GrupaWiekowa
 ORDER BY Rok, Miesiac, GrupaWiekowa;
 
+-- Jednorazowi klienci
 SELECT 
-    GrupaWiekowa, 
+    GrupaWiekowa,
     COUNT(*) AS LiczbaKlientowJednorazowych
 FROM (
-    -- Podzapytanie liczące historię zakupów każdego klienta
     SELECT 
         soh.CustomerID,
         CASE 
-            WHEN DATEDIFF(YEAR, vpd.BirthDate, '2026-01-01') < 40 THEN '1. Mlodzi (<40)'
-            WHEN DATEDIFF(YEAR, vpd.BirthDate, '2026-01-01') BETWEEN 40 AND 60 THEN '2. Sredni (40-60)'
-            ELSE '3. Seniorzy (>60)'
+            WHEN DATEDIFF(YEAR, vpd.BirthDate, '2026-01-01') < 50 THEN '<50'
+            WHEN DATEDIFF(YEAR, vpd.BirthDate, '2026-01-01') BETWEEN 50 AND 70 THEN '50-70'
+            ELSE '70+'
         END AS GrupaWiekowa,
         COUNT(soh.SalesOrderID) AS IleRazy
     FROM Sales.SalesOrderHeader AS soh
@@ -89,26 +89,29 @@ WHERE IleRazy = 1
 GROUP BY GrupaWiekowa;
 
 --CTE
+-- Klienci na miesiąc
 WITH Segmentacja AS (
     SELECT 
-        BusinessEntityID,
+        c.CustomerID,
         CASE
             WHEN DATEDIFF(YEAR, BirthDate, '2026-01-01') < 50 THEN '<50'
             WHEN DATEDIFF(YEAR, BirthDate, '2026-01-01') BETWEEN 50 AND 70 THEN '50-70'
             ELSE '70+'
         END AS GrupaWiekowa
-    FROM Sales.vPersonDemographics
+    FROM Sales.vPersonDemographics vpd
+    JOIN Sales.Customer c 
+        ON vpd.BusinessEntityID = c.PersonID
 ),
 ZakupyKlientow AS (
     SELECT 
-        s.CustomerID,
-        s.SalesOrderID,
+        soh.CustomerID,
+        soh.SalesOrderID,
         seg.GrupaWiekowa,
-        YEAR(s.OrderDate) AS Rok,
-        MONTH(s.OrderDate) AS Miesiac
-    FROM Sales.SalesOrderHeader s
-    JOIN Sales.Customer c ON s.CustomerID = c.CustomerID
-    JOIN Segmentacja seg ON c.PersonID = seg.BusinessEntityID
+        YEAR(soh.OrderDate) AS Rok,
+        MONTH(soh.OrderDate) AS Miesiac
+    FROM Sales.SalesOrderHeader soh
+    JOIN Segmentacja seg
+        ON seg.CustomerID = soh.CustomerID
 )
 SELECT 
     Rok, 
@@ -119,25 +122,28 @@ FROM ZakupyKlientow
 GROUP BY Rok, Miesiac, GrupaWiekowa
 ORDER BY Rok, Miesiac, GrupaWiekowa;
 
+-- Jednorazowi klienci
 WITH Segmentacja AS (
     SELECT 
-        BusinessEntityID,
+        c.CustomerID,
         CASE
             WHEN DATEDIFF(YEAR, BirthDate, '2026-01-01') < 50 THEN '<50'
             WHEN DATEDIFF(YEAR, BirthDate, '2026-01-01') BETWEEN 50 AND 70 THEN '50-70'
             ELSE '70+'
         END AS GrupaWiekowa
-    FROM Sales.vPersonDemographics
+    FROM Sales.vPersonDemographics vpd
+    JOIN Sales.Customer c 
+        ON vpd.BusinessEntityID = c.PersonID
 ),
 LiczbaZakupow AS (
     SELECT 
-        s.CustomerID,
+        soh.CustomerID,
         seg.GrupaWiekowa,
-        COUNT(s.SalesOrderID) AS IleRazy
-    FROM Sales.SalesOrderHeader s
-    JOIN Sales.Customer c ON s.CustomerID = c.CustomerID
-    JOIN Segmentacja seg ON c.PersonID = seg.BusinessEntityID
-    GROUP BY s.CustomerID, seg.GrupaWiekowa
+        COUNT(soh.SalesOrderID) AS IleRazy
+    FROM Sales.SalesOrderHeader soh
+    JOIN Segmentacja seg
+        ON seg.CustomerID = soh.CustomerID
+    GROUP BY soh.CustomerID, seg.GrupaWiekowa
 )
 SELECT 
     GrupaWiekowa, 
@@ -190,6 +196,46 @@ JOIN Production.ProductCategory pc
 GROUP BY p.Name, pc.Name
 ORDER BY Kategoria, Produkt;
 
+----------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------
+--4 
+--bez CTE
+SELECT
+    vpd.Gender AS Plec,
+    YEAR(soh.OrderDate) AS Rok,
+    MONTH(soh.OrderDate) AS Miesiac,
+    COUNT(DISTINCT soh.CustomerID) AS LiczbaKlientow,
+    SUM(soh.TotalDue) * 100.0 / SUM(SUM(soh.TotalDue)) OVER(YEAR(soh.OrderDate), MONTH(soh.OrderDate)) AS UdzialSprzedazy
+FROM Sales.vPersonDemographics vpd
+JOIN Sales.Customer c
+    ON c.PersonID = vpd.BusinessEntityID
+JOIN Sales.SalesOrderHeader soh
+    ON soh.CustomerID = c.CustomerID
+GROUP BY vpd.Gender, YEAR(soh.OrderDate), MONTH(soh.OrderDate)
+ORDER BY Rok, Miesiac, Plec;
+
+-- CTE
+WITH SprzedazPlci AS (
+    SELECT
+        vpd.Gender AS Plec,
+        YEAR(soh.OrderDate) AS Rok,
+        MONTH(soh.OrderDate) AS Miesiac,
+        COUNT(DISTINCT soh.CustomerID) AS LiczbaKlientow,
+        SUM(soh.TotalDue) AS SumaMiesieczna
+    FROM Sales.vPersonDemographics vpd
+    JOIN Sales.Customer c
+        ON c.PersonID = vpd.BusinessEntityID
+    JOIN Sales.SalesOrderHeader soh
+        ON soh.CustomerID = c.CustomerID
+)
+SELECT
+    Plec,
+    Rok,
+    Miesiac,
+    LiczbaKlientow,
+    SumaMiesieczna * 100.0 / SUM(SumaMiesieczna) OVER(PARTITION BY Rok, Miesiac) AS UdzialProcentowy
+FROM SprzedazPlci
+ 
 ----------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------
 
