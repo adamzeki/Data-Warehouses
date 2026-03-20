@@ -39,6 +39,8 @@ FROM Sales.SalesOrderHeader soh
 GROUP BY YEAR(soh.OrderDate), DATEPART(dw, soh.OrderDate)
 ORDER BY Rok, DATEPART(dw, soh.OrderDate);
 
+-- Przeceny w dniach
+
 ----------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------
 
@@ -196,16 +198,24 @@ JOIN Production.ProductCategory pc
 GROUP BY p.Name, pc.Name
 ORDER BY Kategoria, Produkt;
 
+-- ile produktów aktualnie w sprzedaży
+SELECT
+    COUNT(DISTINCT(p.ProductID)) AS ProduktyWSprzedazy
+FROM Production.Product p
+WHERE p.SellEndDate IS NULL
+    AND p.FinishedGoodsFlag = 1;
+
+
 ----------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------
 --4 
---bez CTE
+-- bez CTE
 SELECT
     vpd.Gender AS Plec,
     YEAR(soh.OrderDate) AS Rok,
     MONTH(soh.OrderDate) AS Miesiac,
     COUNT(DISTINCT soh.CustomerID) AS LiczbaKlientow,
-    SUM(soh.TotalDue) * 100.0 / SUM(SUM(soh.TotalDue)) OVER(YEAR(soh.OrderDate), MONTH(soh.OrderDate)) AS UdzialSprzedazy
+    SUM(soh.TotalDue) * 100.0 / SUM(SUM(soh.TotalDue)) OVER(PARTITION BY YEAR(soh.OrderDate), MONTH(soh.OrderDate)) AS UdzialSprzedazy
 FROM Sales.vPersonDemographics vpd
 JOIN Sales.Customer c
     ON c.PersonID = vpd.BusinessEntityID
@@ -227,6 +237,7 @@ WITH SprzedazPlci AS (
         ON c.PersonID = vpd.BusinessEntityID
     JOIN Sales.SalesOrderHeader soh
         ON soh.CustomerID = c.CustomerID
+    GROUP BY vpd.Gender, YEAR(soh.OrderDate), MONTH(soh.OrderDate)
 )
 SELECT
     Plec,
@@ -235,6 +246,7 @@ SELECT
     LiczbaKlientow,
     SumaMiesieczna * 100.0 / SUM(SumaMiesieczna) OVER(PARTITION BY Rok, Miesiac) AS UdzialProcentowy
 FROM SprzedazPlci
+ORDER BY Rok, Miesiac, Plec;
  
 ----------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------
@@ -290,3 +302,46 @@ ORDER BY Kategoria, UdzialKwotowy DESC;
 ----------------------------------------------------------------------------------------
 
 --6
+
+-- bez CTE
+SELECT 
+    st.[Group] AS Kontynent,
+    st.[Name] AS Region,
+    ISNULL(cur.Name, 'United States Dollar') AS NazwaWaluty,
+    ISNULL(cur.CurrencyCode, 'USD') AS KodWaluty,
+    SUM(soh.TotalDue) AS CalkowitaSprzedaz_USD,
+    SUM(soh.TotalDue) * 100.0 / SUM(SUM(soh.TotalDue)) OVER(PARTITION BY st.[Group]) AS UdzialKontynentu
+FROM Sales.SalesOrderHeader soh
+JOIN Sales.SalesTerritory st 
+    ON soh.TerritoryID = st.TerritoryID
+LEFT JOIN Sales.CurrencyRate cr 
+    ON soh.CurrencyRateID = cr.CurrencyRateID
+LEFT JOIN Sales.Currency cur 
+    ON cr.ToCurrencyCode = cur.CurrencyCode
+GROUP BY st.[Group], st.[Name], cur.Name, cur.CurrencyCode
+ORDER BY Kontynent, UdzialKontynentu DESC;
+
+-- z CTE
+WITH SprzedazRegionu AS (
+    SELECT
+        soh.TerritoryID,
+        ISNULL(cr.ToCurrencyCode, 'USD') AS KodWaluty, 
+        SUM(soh.TotalDue) AS SumaDlaWaluty
+    FROM Sales.SalesOrderHeader soh
+    LEFT JOIN Sales.CurrencyRate cr 
+        ON soh.CurrencyRateID = cr.CurrencyRateID
+    GROUP BY soh.TerritoryID, cr.ToCurrencyCode
+)
+SELECT
+    st.[Group] AS Kontynent,
+    st.[Name] AS Region,
+    ISNULL(c.Name, 'United States Dollar') AS NazwaWaluty,
+    sr.KodWaluty,
+    sr.SumaDlaWaluty,
+    sr.SumaDlaWaluty * 100.0 / SUM(sr.SumaDlaWaluty) OVER(PARTITION BY st.[Group]) AS UdzialKontynentu
+FROM SprzedazRegionu sr
+JOIN Sales.SalesTerritory st 
+    ON sr.TerritoryID = st.TerritoryID
+LEFT JOIN Sales.Currency c 
+    ON sr.KodWaluty = c.CurrencyCode
+ORDER BY Kontynent, UdzialKontynentu DESC;
