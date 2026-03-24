@@ -135,6 +135,30 @@ FROM SprzedazProduktow
 ORDER BY Rok, UdzialProcentowy DESC;
 
 --3.2
+WITH MiesiecznaSprzedaz AS (
+    SELECT 
+        p.FirstName + ' ' + p.LastName AS Sprzedawca,
+        soh.SalesPersonID,
+        YEAR(soh.OrderDate) AS Rok,
+        MONTH(soh.OrderDate) AS Miesiac,
+        COUNT(soh.SalesOrderID) AS ZamowieniaWMiesiacu
+    FROM Sales.SalesOrderHeader soh
+    JOIN Person.Person p 
+        ON soh.SalesPersonID = p.BusinessEntityID
+    WHERE soh.SalesPersonID IS NOT NULL
+    GROUP BY p.FirstName, p.LastName, soh.SalesPersonID, YEAR(soh.OrderDate), MONTH(soh.OrderDate)
+)
+SELECT 
+    Sprzedawca,
+    Rok,
+    Miesiac,
+    ZamowieniaWMiesiacu,
+    SUM(ZamowieniaWMiesiacu) OVER(PARTITION BY SalesPersonID, Rok) AS SumaWRoku,
+    SUM(ZamowieniaWMiesiacu) OVER(PARTITION BY SalesPersonID, Rok ORDER BY Miesiac) AS NarastajacoWRoku,
+    SUM(ZamowieniaWMiesiacu) OVER(PARTITION BY SalesPersonID ORDER BY Rok, Miesiac ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS ObecnyIPoprzedniMiesiac
+FROM MiesiecznaSprzedaz
+ORDER BY Sprzedawca, Rok, Miesiac;
+
 
 --3.3
 SELECT 
